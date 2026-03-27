@@ -65,7 +65,7 @@ pub struct WatchArgs {
     #[arg(long)]
     pub ip: Option<String>,
     /// Calibration duration in seconds
-    #[arg(long, default_value_t = 30)]
+    #[arg(long, default_value_t = 10)]
     pub calibration_secs: u64,
     /// Motion threshold multiplier above baseline
     #[arg(long, default_value_t = 3.0)]
@@ -76,6 +76,15 @@ pub struct WatchArgs {
     /// Frame height for analysis
     #[arg(long, default_value_t = 240)]
     pub height: u32,
+    /// Grid columns for motion detection
+    #[arg(long, default_value_t = 16)]
+    pub grid_cols: u32,
+    /// Grid rows for motion detection
+    #[arg(long, default_value_t = 12)]
+    pub grid_rows: u32,
+    /// Adaptive baseline time constant in seconds (0 = disabled)
+    #[arg(long, default_value_t = 10.0)]
+    pub adapt_tau: f64,
 }
 
 fn default_session_path() -> String {

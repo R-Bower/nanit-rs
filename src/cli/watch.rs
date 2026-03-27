@@ -7,8 +7,8 @@ use tracing::info;
 
 use crate::api::client::NanitClient;
 use crate::cli::WatchArgs;
-use crate::motion::calibrator::SnooCalibrator;
-use crate::motion::detector::{frame_intensity, MotionDetector};
+use crate::motion::calibrator::GridCalibrator;
+use crate::motion::detector::{grid_intensities, GridConfig, GridMotionDetector};
 use crate::motion::pipeline::FramePipeline;
 use crate::proto;
 use crate::session::init_session_store;
@@ -60,12 +60,15 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
         .await?;
 
     // --- Calibration phase ---
+    let grid = GridConfig::new(args.width, args.height, args.grid_cols, args.grid_rows);
+    let mut cell_buf = vec![0.0f64; grid.num_cells];
+
     println!(
-        "Calibrating for {} seconds (collecting Snoo baseline)...",
-        args.calibration_secs
+        "Calibrating for {} seconds ({}x{} grid, {} cells)...",
+        args.calibration_secs, args.grid_cols, args.grid_rows, grid.num_cells,
     );
 
-    let mut calibrator = SnooCalibrator::new();
+    let mut calibrator = GridCalibrator::new(grid.num_cells);
     let mut prev_frame: Option<Vec<u8>> = None;
     let calibration_deadline = Instant::now() + Duration::from_secs(args.calibration_secs);
     let mut frame_count: u64 = 0;
@@ -96,8 +99,8 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
         frame_count += 1;
 
         if let Some(ref prev) = prev_frame {
-            let intensity = frame_intensity(prev, &frame);
-            calibrator.add_sample(intensity);
+            grid_intensities(prev, &frame, &grid, &mut cell_buf);
+            calibrator.add_samples(&cell_buf);
         }
         prev_frame = Some(frame);
     }
@@ -109,20 +112,36 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
         15.0 // fallback
     };
 
-    let baseline = calibrator.compute_baseline().unwrap_or(0.01);
+    let cell_stats = calibrator.cell_stats();
+    let avg_mean = cell_stats.iter().map(|(m, _)| m).sum::<f64>() / cell_stats.len() as f64;
+    let avg_std = cell_stats.iter().map(|(_, s)| s).sum::<f64>() / cell_stats.len() as f64;
     println!(
-        "Calibration complete: {} samples, mean={:.6}, std_dev={:.6}, baseline={:.6}, fps≈{:.1}",
+        "Calibration complete: {} samples, avg_mean={:.6}, avg_std={:.6}, fps≈{:.1}",
         calibrator.sample_count(),
-        calibrator.mean(),
-        calibrator.std_dev(),
-        baseline,
+        avg_mean,
+        avg_std,
         fps_estimate,
     );
 
     // --- Detection phase ---
-    let mut detector = MotionDetector::new(baseline, args.threshold, fps_estimate, 0.3);
+    let cell_stats = if calibrator.sample_count() > 0 {
+        cell_stats
+    } else {
+        vec![(0.01, 0.005); grid.num_cells]
+    };
+    let mut detector =
+        GridMotionDetector::new(cell_stats, args.threshold, fps_estimate, 0.15, args.adapt_tau);
 
-    println!("Watching for motion (threshold_multiplier={:.1})...", args.threshold);
+    let mut debug_frame_count: u64 = 0;
+
+    if args.adapt_tau > 0.0 {
+        println!(
+            "Watching for motion (threshold_multiplier={:.1}, adaptive tau={:.0}s)",
+            args.threshold, args.adapt_tau,
+        );
+    } else {
+        println!("Watching for motion (threshold_multiplier={:.1}, adaptive=off)", args.threshold);
+    }
 
     loop {
         let frame = tokio::select! {
@@ -142,15 +161,29 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
         };
 
         if let Some(ref prev) = prev_frame {
-            let intensity = frame_intensity(prev, &frame);
-            if let Some(rolling_avg) = detector.update(intensity) {
+            grid_intensities(prev, &frame, &grid, &mut cell_buf);
+            let peak = cell_buf.iter().cloned().fold(0.0f64, f64::max);
+            let peak_idx = cell_buf
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            if let Some(event) = detector.update(&cell_buf) {
                 let now = Utc::now().to_rfc3339();
+                let cell_col = event.max_cell_index % grid.cols as usize;
+                let cell_row = event.max_cell_index / grid.cols as usize;
                 println!(
-                    "[{now}] MOTION intensity={:.4} (baseline={:.4})",
-                    rolling_avg,
-                    detector.baseline()
+                    "[{now}] MOTION intensity={:.4} cell=({},{}) elevated_cells={}",
+                    event.max_cell_intensity, cell_col, cell_row, event.num_elevated_cells,
                 );
+            } else if debug_frame_count % 7 == 0 {
+                // Print peak cell intensity ~once per second for tuning
+                let col = peak_idx % grid.cols as usize;
+                let row = peak_idx / grid.cols as usize;
+                println!("  [debug] peak={:.6} cell=({},{})", peak, col, row);
             }
+            debug_frame_count += 1;
         }
         prev_frame = Some(frame);
     }
