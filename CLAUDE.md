@@ -76,9 +76,9 @@ These are reverse-engineered and must be preserved exactly:
 
 The baby is in a Snoo smart bassinet that rocks constantly. Simple frame differencing would always trigger. The approach:
 
-1. **Calibration** (first 30s): Collect frame-to-frame pixel intensity values, compute `mean + 2σ` as baseline (captures 95% of rocking)
-2. **Detection**: Rolling average over 0.5s window, alert when `rolling_avg > baseline × threshold_multiplier` (default 3.0)
-3. **Debounce**: 0.3s sustained elevation required to avoid false positives
+1. **Calibration** (first 10s): Collect frame-to-frame pixel intensity values, compute `mean + 2σ` as baseline (captures 95% of rocking)
+2. **Detection**: Rolling average over ~0.15s window, alert when `rolling_avg > baseline + threshold_offset` (default 0.008)
+3. **Debounce**: 0.15s sustained elevation required to avoid false positives
 
 Pipeline: Camera → RTMP push → ffmpeg (scale+grayscale) → raw frames → calibrate/detect → stdout
 
@@ -91,8 +91,8 @@ nanit messages <baby_uid>             # fetch recent events
 nanit sensors <baby_uid>              # live sensor data via WebSocket
 nanit stream <baby_uid> [-o file]     # RTMP stream (play or record)
 nanit watch <baby_uid>                # motion detection with Snoo calibration
-  [--calibration-secs 30]
-  [--threshold 3.0]
+  [--calibration-secs 10]
+  [--threshold 0.008]
   [--width 320] [--height 240]
   [--port 1935] [--ip <addr>]
 ```
