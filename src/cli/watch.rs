@@ -136,11 +136,11 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
 
     if args.adapt_tau > 0.0 {
         println!(
-            "Watching for motion (threshold_multiplier={:.1}, adaptive tau={:.0}s)",
+            "Watching for motion (threshold_offset={:.4}, adaptive tau={:.0}s)",
             args.threshold, args.adapt_tau,
         );
     } else {
-        println!("Watching for motion (threshold_multiplier={:.1}, adaptive=off)", args.threshold);
+        println!("Watching for motion (threshold_offset={:.4}, adaptive=off)", args.threshold);
     }
 
     loop {
@@ -177,7 +177,7 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
                     "[{now}] MOTION intensity={:.4} cell=({},{}) elevated_cells={}",
                     event.max_cell_intensity, cell_col, cell_row, event.num_elevated_cells,
                 );
-            } else if debug_frame_count % 7 == 0 {
+            } else if debug_frame_count.is_multiple_of(7) {
                 // Print peak cell intensity ~once per second for tuning
                 let col = peak_idx % grid.cols as usize;
                 let row = peak_idx / grid.cols as usize;

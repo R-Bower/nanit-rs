@@ -6,6 +6,9 @@ Rust CLI for the Nanit baby monitor. Pulls a live RTMP stream from the camera an
 
 The Snoo rocks nonstop, so normal frame differencing is inaccurate. This uses a grid-based approach with adaptive baselines to separate rocking from actual baby movement.
 
+- baseline: the normal intensity level for each cell, i.e. how much it typically changes frame-to-frame from just the rocking.
+- adaptive: it updates itself in response to movement. When the baby shifts position and the rocking looks different to certain cells, those cells' baselines adjust to match within about 30-50 seconds.
+
 **Grid**: The frame is divided into a 16x12 grid of 20x20px cells. Motion is tracked per-cell so small movements don't get lost in a full-frame average.
 
 **Calibration**: On startup, 10 seconds of rocking data is collected. Each cell gets a baseline of mean + 2 standard deviations, which covers about 95% of normal rocking. Cells with very low baselines get a floor of 0.006. The detection threshold is `baseline * multiplier`, so if a cell's baseline is near zero, the threshold is also near zero and everything triggers. The floor prevents this.

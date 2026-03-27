@@ -67,8 +67,8 @@ pub struct WatchArgs {
     /// Calibration duration in seconds
     #[arg(long, default_value_t = 10)]
     pub calibration_secs: u64,
-    /// Motion threshold multiplier above baseline
-    #[arg(long, default_value_t = 3.0)]
+    /// Additive threshold offset above baseline
+    #[arg(long, default_value_t = 0.008)]
     pub threshold: f64,
     /// Frame width for analysis
     #[arg(long, default_value_t = 320)]
