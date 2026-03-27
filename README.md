@@ -2,6 +2,8 @@
 
 Rust CLI for the Nanit baby monitor. Pulls a live RTMP stream from the camera and does motion detection, built to work with the Snoo bassinet.
 
+Inspired by: https://github.com/gregory-m/nanit
+
 ## Motion detection
 
 The Snoo rocks nonstop, so normal frame differencing is inaccurate. This uses a grid-based approach with adaptive baselines to separate rocking from actual baby movement.
