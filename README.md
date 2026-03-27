@@ -9,7 +9,7 @@ Inspired by: https://github.com/gregory-m/nanit
 The Snoo rocks nonstop, so normal frame differencing is inaccurate. This uses a grid-based approach with adaptive baselines to separate rocking from actual baby movement.
 
 - baseline: the normal intensity level for each cell, i.e. how much it typically changes frame-to-frame from just the rocking.
-- adaptive: it updates itself in response to movement. When the baby shifts position and the rocking looks different to certain cells, those cells' baselines adjust to match within about 30-50 seconds.
+- adaptive: it updates itself in response to movement. When the baby shifts position and the rocking looks different to certain cells, those cells' baselines adjust to match within about ~3 seconds.
 
 **Grid**: The frame is divided into a 16x12 grid of 20x20px cells. Motion is tracked per-cell so small movements don't get lost in a full-frame average.
 
