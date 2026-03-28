@@ -66,10 +66,22 @@ pub async fn run(session_path: &str, args: StreamArgs) -> anyhow::Result<()> {
 
     if args.output.is_none() {
         let ffmpeg_stdout = ffmpeg.stdout.take().unwrap();
-        let std_stdout: std::process::ChildStdout = ffmpeg_stdout
-            .into_owned_fd()
-            .map(std::process::ChildStdout::from)
-            .expect("failed to convert tokio stdout to std stdout");
+        let std_stdout: std::process::ChildStdout = {
+            #[cfg(unix)]
+            {
+                ffmpeg_stdout
+                    .into_owned_fd()
+                    .map(std::process::ChildStdout::from)
+                    .expect("failed to convert tokio stdout to std stdout")
+            }
+            #[cfg(windows)]
+            {
+                ffmpeg_stdout
+                    .into_owned_handle()
+                    .map(std::process::ChildStdout::from)
+                    .expect("failed to convert tokio stdout to std stdout")
+            }
+        };
         ffplay = Some(
             Command::new("ffplay")
                 .args(["-i", "pipe:0", "-infbuf", "-framedrop"])
