@@ -55,6 +55,14 @@ pub struct StreamArgs {
     pub ip: Option<String>,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum OutputMode {
+    /// Rolling hh:mm:ss counter since last motion event
+    Counter,
+    /// All logs: motion events and debug peak info
+    Debug,
+}
+
 #[derive(clap::Args, Clone)]
 pub struct WatchArgs {
     pub baby_uid: String,
@@ -85,6 +93,12 @@ pub struct WatchArgs {
     /// Adaptive baseline time constant in seconds (0 = disabled)
     #[arg(long, default_value_t = 10.0)]
     pub adapt_tau: f64,
+    /// Output mode: counter (rolling timer) or debug (all logs)
+    #[arg(long, value_enum, default_value_t = OutputMode::Counter)]
+    pub output: OutputMode,
+    /// Log file for debug events (always writes motion + peak data)
+    #[arg(long)]
+    pub log_file: Option<String>,
 }
 
 fn default_session_path() -> String {

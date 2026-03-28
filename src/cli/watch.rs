@@ -1,3 +1,6 @@
+use std::collections::VecDeque;
+use std::fs::OpenOptions;
+use std::io::Write as _;
 use std::time::Instant;
 
 use chrono::Utc;
@@ -6,7 +9,7 @@ use tokio::time::{sleep, Duration};
 use tracing::info;
 
 use crate::api::client::NanitClient;
-use crate::cli::WatchArgs;
+use crate::cli::{OutputMode, WatchArgs};
 use crate::motion::calibrator::GridCalibrator;
 use crate::motion::detector::{grid_intensities, GridConfig, GridMotionDetector};
 use crate::motion::pipeline::FramePipeline;
@@ -143,18 +146,50 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
         println!("Watching for motion (threshold_offset={:.4}, adaptive=off)", args.threshold);
     }
 
+    let mut log_writer = args.log_file.as_ref().map(|path| {
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap_or_else(|e| panic!("Failed to open log file {path}: {e}"))
+    });
+
+    let mut last_motion = Instant::now();
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut recent_events: VecDeque<Instant> = VecDeque::new();
+    let fifteen_min = Duration::from_secs(15 * 60);
+
+    if matches!(args.output, OutputMode::Counter) {
+        println!("Counter mode: displaying time since last motion (hh:mm:ss)");
+    }
+
     loop {
         let frame = tokio::select! {
             f = pipeline.next_frame() => f,
             _ = signal::ctrl_c() => {
-                println!("\nStopping...");
+                if matches!(args.output, OutputMode::Counter) { println!(); }
+                println!("Stopping...");
                 break;
+            }
+            _ = tick.tick(), if matches!(args.output, OutputMode::Counter) => {
+                let now = Instant::now();
+                while recent_events.front().is_some_and(|t| now.duration_since(*t) > fifteen_min) {
+                    recent_events.pop_front();
+                }
+                let elapsed = last_motion.elapsed().as_secs();
+                let h = elapsed / 3600;
+                let m = (elapsed % 3600) / 60;
+                let s = elapsed % 60;
+                print!("\r{h:02}:{m:02}:{s:02}  events(15m): {}   ", recent_events.len());
+                let _ = std::io::stdout().flush();
+                continue;
             }
         };
 
         let frame = match frame {
             Some(f) => f,
             None => {
+                if matches!(args.output, OutputMode::Counter) { println!(); }
                 eprintln!("ffmpeg stream ended.");
                 break;
             }
@@ -170,18 +205,44 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
                 .map(|(i, _)| i)
                 .unwrap_or(0);
             if let Some(event) = detector.update(&cell_buf) {
-                let now = Utc::now().to_rfc3339();
+                let ts = Utc::now().to_rfc3339();
                 let cell_col = event.max_cell_index % grid.cols as usize;
                 let cell_row = event.max_cell_index / grid.cols as usize;
-                println!(
-                    "[{now}] MOTION intensity={:.4} cell=({},{}) elevated_cells={}",
-                    event.max_cell_intensity, cell_col, cell_row, event.num_elevated_cells,
-                );
+
+                if let Some(ref mut w) = log_writer {
+                    let _ = writeln!(
+                        w,
+                        "[{ts}] MOTION intensity={:.4} cell=({},{}) elevated_cells={}",
+                        event.max_cell_intensity, cell_col, cell_row, event.num_elevated_cells,
+                    );
+                }
+
+                match args.output {
+                    OutputMode::Debug => {
+                        println!(
+                            "[{ts}] MOTION intensity={:.4} cell=({},{}) elevated_cells={}",
+                            event.max_cell_intensity, cell_col, cell_row, event.num_elevated_cells,
+                        );
+                    }
+                    OutputMode::Counter => {
+                        let now = Instant::now();
+                        last_motion = now;
+                        recent_events.push_back(now);
+                        print!("\r00:00:00  events(15m): {}   ", recent_events.len());
+                        let _ = std::io::stdout().flush();
+                    }
+                }
             } else if debug_frame_count.is_multiple_of(7) {
-                // Print peak cell intensity ~once per second for tuning
                 let col = peak_idx % grid.cols as usize;
                 let row = peak_idx / grid.cols as usize;
-                println!("  [debug] peak={:.6} cell=({},{})", peak, col, row);
+
+                if let Some(ref mut w) = log_writer {
+                    let _ = writeln!(w, "[debug] peak={:.6} cell=({},{})", peak, col, row);
+                }
+
+                if matches!(args.output, OutputMode::Debug) {
+                    println!("  [debug] peak={:.6} cell=({},{})", peak, col, row);
+                }
             }
             debug_frame_count += 1;
         }
