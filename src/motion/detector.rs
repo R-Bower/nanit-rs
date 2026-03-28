@@ -113,6 +113,9 @@ pub struct GridMotionDetector {
     window_max: usize,
     debounce_count: usize,
     elevated_streak: usize,
+    // Suppress motion for this many frames after a false positive
+    fp_cooldown: usize,
+    fp_cooldown_max: usize,
     // Adaptive baseline EMA state
     ema_means: Vec<f64>,
     ema_variances: Vec<f64>,
@@ -153,6 +156,7 @@ impl GridMotionDetector {
             0.0
         };
         let warmup_frames = (fps_estimate * 5.0).max(1.0) as u64;
+        let fp_cooldown_max = (fps_estimate * 3.0).max(1.0) as usize;
 
         Self {
             num_cells,
@@ -162,6 +166,8 @@ impl GridMotionDetector {
             window_max,
             debounce_count,
             elevated_streak: 0,
+            fp_cooldown: 0,
+            fp_cooldown_max,
             ema_means,
             ema_variances,
             alpha,
@@ -203,7 +209,14 @@ impl GridMotionDetector {
         // Majority of cells elevated — camera jitter, lighting change, IR toggle
         if elevated_cells * 2 > self.num_cells {
             self.elevated_streak = 0;
+            self.fp_cooldown = self.fp_cooldown_max;
             return DetectorResult::FalsePositive { num_elevated_cells: elevated_cells };
+        }
+
+        if self.fp_cooldown > 0 {
+            self.fp_cooldown -= 1;
+            self.elevated_streak = 0;
+            return DetectorResult::None;
         }
 
         if elevated_cells > 0 {
