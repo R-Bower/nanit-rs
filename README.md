@@ -9,7 +9,7 @@ Inspired by: https://github.com/gregory-m/nanit
 The Snoo rocks nonstop, so normal frame differencing is inaccurate. This uses a grid-based approach with adaptive baselines to separate rocking from actual baby movement.
 
 - baseline: the normal intensity level for each cell, i.e. how much it typically changes frame-to-frame from just the rocking.
-- adaptive: it updates itself in response to movement. When the baby shifts position and the rocking looks different to certain cells, those cells' baselines adjust to match within about ~3 seconds.
+- adaptive: it updates itself in response to movement. When the baby shifts position and the rocking looks different to certain cells, those cells' baselines adjust to match within about ~30 seconds.
 
 **Grid**: The frame is divided into a 16x12 grid of 20x20px cells. Motion is tracked per-cell so small movements don't get lost in a full-frame average.
 
@@ -17,9 +17,9 @@ The Snoo rocks nonstop, so normal frame differencing is inaccurate. This uses a 
 
 **Detection**: A cell is flagged when its intensity exceeds its baseline by more than the threshold offset (default 0.008). Has to stay elevated for ~0.15s to count — single frame spikes are ignored.
 
-**Adaptation**: Baselines aren't static. On frames where nothing is flagged, each cell's baseline slowly adjusts toward what it's currently seeing (exponential moving average, tau=10s). This handles the baby shifting to a new position. The rocking pattern changes and the baselines follow. Settles in about ~3 seconds after a position change.
+**Adaptation**: Baselines aren't static. On frames where nothing is flagged, each cell's baseline slowly adjusts toward what it's currently seeing (exponential moving average, tau=10s). This handles the baby shifting to a new position. The rocking pattern changes and the baselines follow. Settles in about ~30 seconds after a position change.
 
-In practice, rocking produces per-cell intensities of 0.001-0.006 and real movement is 0.020+.
+In practice, rocking produces per-cell intensities of 0.001-0.014 and real movement is 0.020+.
 
 ```
 [2026-03-27T08:45:12.123Z] MOTION intensity=0.0234 cell=(7,5) elevated_cells=3
