@@ -227,7 +227,9 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
                     OutputMode::Counter => {
                         let now = Instant::now();
                         last_motion = now;
-                        recent_events.push_back(now);
+                        if recent_events.back().is_none_or(|&t| now.duration_since(t) >= Duration::from_secs(1)) {
+                            recent_events.push_back(now);
+                        }
                         print!("\r00:00:00  events(15m): {}   ", recent_events.len());
                         let _ = std::io::stdout().flush();
                     }
