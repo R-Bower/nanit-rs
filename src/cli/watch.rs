@@ -11,7 +11,7 @@ use tracing::info;
 use crate::api::client::NanitClient;
 use crate::cli::{OutputMode, WatchArgs};
 use crate::motion::calibrator::GridCalibrator;
-use crate::motion::detector::{grid_intensities, GridConfig, GridMotionDetector};
+use crate::motion::detector::{grid_intensities, DetectorResult, GridConfig, GridMotionDetector};
 use crate::motion::pipeline::FramePipeline;
 use crate::proto;
 use crate::session::init_session_store;
@@ -204,47 +204,68 @@ pub async fn run(session_path: &str, args: WatchArgs) -> anyhow::Result<()> {
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                 .map(|(i, _)| i)
                 .unwrap_or(0);
-            if let Some(event) = detector.update(&cell_buf) {
-                let ts = Utc::now().to_rfc3339();
-                let cell_col = event.max_cell_index % grid.cols as usize;
-                let cell_row = event.max_cell_index / grid.cols as usize;
+            match detector.update(&cell_buf) {
+                DetectorResult::Motion(event) => {
+                    let ts = Utc::now().to_rfc3339();
+                    let cell_col = event.max_cell_index % grid.cols as usize;
+                    let cell_row = event.max_cell_index / grid.cols as usize;
 
-                if let Some(ref mut w) = log_writer {
-                    let _ = writeln!(
-                        w,
-                        "[{ts}] MOTION intensity={:.4} cell=({},{}) elevated_cells={}",
-                        event.max_cell_intensity, cell_col, cell_row, event.num_elevated_cells,
-                    );
-                }
-
-                match args.output {
-                    OutputMode::Debug => {
-                        println!(
+                    if let Some(ref mut w) = log_writer {
+                        let _ = writeln!(
+                            w,
                             "[{ts}] MOTION intensity={:.4} cell=({},{}) elevated_cells={}",
                             event.max_cell_intensity, cell_col, cell_row, event.num_elevated_cells,
                         );
                     }
-                    OutputMode::Counter => {
-                        let now = Instant::now();
-                        last_motion = now;
-                        if recent_events.back().is_none_or(|&t| now.duration_since(t) >= Duration::from_secs(1)) {
-                            recent_events.push_back(now);
+
+                    match args.output {
+                        OutputMode::Debug => {
+                            println!(
+                                "[{ts}] MOTION intensity={:.4} cell=({},{}) elevated_cells={}",
+                                event.max_cell_intensity, cell_col, cell_row, event.num_elevated_cells,
+                            );
                         }
-                        print!("\r00:00:00  events(15m): {}   ", recent_events.len());
-                        let _ = std::io::stdout().flush();
+                        OutputMode::Counter => {
+                            let now = Instant::now();
+                            last_motion = now;
+                            if recent_events.back().is_none_or(|&t| now.duration_since(t) >= Duration::from_secs(1)) {
+                                recent_events.push_back(now);
+                            }
+                            print!("\r00:00:00  events(15m): {}   ", recent_events.len());
+                            let _ = std::io::stdout().flush();
+                        }
                     }
                 }
-            } else if debug_frame_count.is_multiple_of(7) {
-                let col = peak_idx % grid.cols as usize;
-                let row = peak_idx / grid.cols as usize;
-
-                if let Some(ref mut w) = log_writer {
-                    let _ = writeln!(w, "[debug] peak={:.6} cell=({},{})", peak, col, row);
+                DetectorResult::FalsePositive { num_elevated_cells } => {
+                    let ts = Utc::now().to_rfc3339();
+                    if let Some(ref mut w) = log_writer {
+                        let _ = writeln!(
+                            w,
+                            "[{ts}] FALSE_POSITIVE elevated_cells={}/{}",
+                            num_elevated_cells, grid.num_cells,
+                        );
+                    }
+                    if matches!(args.output, OutputMode::Debug) {
+                        println!(
+                            "[{ts}] FALSE_POSITIVE elevated_cells={}/{}",
+                            num_elevated_cells, grid.num_cells,
+                        );
+                    }
                 }
+                _ if debug_frame_count.is_multiple_of(7) => {
+                    let ts = Utc::now().to_rfc3339();
+                    let col = peak_idx % grid.cols as usize;
+                    let row = peak_idx / grid.cols as usize;
 
-                if matches!(args.output, OutputMode::Debug) {
-                    println!("  [debug] peak={:.6} cell=({},{})", peak, col, row);
+                    if let Some(ref mut w) = log_writer {
+                        let _ = writeln!(w, "[{ts}] debug peak={:.6} cell=({},{})", peak, col, row);
+                    }
+
+                    if matches!(args.output, OutputMode::Debug) {
+                        println!("  [{ts}] debug peak={:.6} cell=({},{})", peak, col, row);
+                    }
                 }
+                _ => {}
             }
             debug_frame_count += 1;
         }

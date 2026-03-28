@@ -83,6 +83,27 @@ pub struct MotionEvent {
     pub num_elevated_cells: usize,
 }
 
+/// Result of a single detector update.
+pub enum DetectorResult {
+    /// No elevated cells.
+    None,
+    /// Elevated cells detected but debounce not yet met.
+    Debouncing,
+    /// Motion confirmed after debounce.
+    Motion(MotionEvent),
+    /// Majority of cells elevated — camera jitter, lighting change, etc.
+    FalsePositive { num_elevated_cells: usize },
+}
+
+impl DetectorResult {
+    pub fn motion(self) -> Option<MotionEvent> {
+        match self {
+            DetectorResult::Motion(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 /// Grid-aware motion detector with per-cell rolling windows, debounce, and adaptive baselines.
 pub struct GridMotionDetector {
     num_cells: usize,
@@ -149,8 +170,8 @@ impl GridMotionDetector {
         }
     }
 
-    /// Feed per-cell intensities. Returns `Some(MotionEvent)` if motion is detected.
-    pub fn update(&mut self, cell_intensities: &[f64]) -> Option<MotionEvent> {
+    /// Feed per-cell intensities and return the detection result.
+    pub fn update(&mut self, cell_intensities: &[f64]) -> DetectorResult {
         assert_eq!(cell_intensities.len(), self.num_cells);
 
         let mut max_avg = 0.0f64;
@@ -179,21 +200,27 @@ impl GridMotionDetector {
             }
         }
 
+        // Majority of cells elevated — camera jitter, lighting change, IR toggle
+        if elevated_cells * 2 > self.num_cells {
+            self.elevated_streak = 0;
+            return DetectorResult::FalsePositive { num_elevated_cells: elevated_cells };
+        }
+
         if elevated_cells > 0 {
             self.elevated_streak += 1;
             if self.elevated_streak >= self.debounce_count {
-                return Some(MotionEvent {
+                return DetectorResult::Motion(MotionEvent {
                     max_cell_intensity: max_avg,
                     max_cell_index: max_idx,
                     num_elevated_cells: elevated_cells,
                 });
             }
-        } else {
-            self.elevated_streak = 0;
-            self.adapt_baselines(cell_intensities);
+            return DetectorResult::Debouncing;
         }
 
-        None
+        self.elevated_streak = 0;
+        self.adapt_baselines(cell_intensities);
+        DetectorResult::None
     }
 
     /// Update per-cell baselines using EMA on non-motion frames.
@@ -300,7 +327,7 @@ mod tests {
         let intensities = [0.0, 0.0, 0.5, 0.0];
         let mut detected = false;
         for _ in 0..10 {
-            if det.update(&intensities).is_some() {
+            if det.update(&intensities).motion().is_some() {
                 detected = true;
                 break;
             }
@@ -315,7 +342,7 @@ mod tests {
         let mut det = GridMotionDetector::new(stats, 0.2, 10.0, 0.3, 0.0);
         let intensities = [0.05, 0.05, 0.05, 0.05];
         for _ in 0..20 {
-            assert!(det.update(&intensities).is_none());
+            assert!(det.update(&intensities).motion().is_none());
         }
     }
 
